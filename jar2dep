@@ -1,0 +1,42 @@
+#!/bin/bash
+
+## Configuration
+UNZIP=unzip
+XSLTPROC=xsltproc
+OPENSSL=openssl
+
+function extractFromPom {
+    if [ ! -z "`$UNZIP -lqq $1 '*/pom.xml'`" ]; then
+	$UNZIP -p $1 '*/pom.xml' | xsltproc --stringparam scope $2 $0.xsl -
+    fi
+}
+
+function extractFromMvnRepo {
+    local sha1Jar=`$OPENSSL sha1 $1 | sed 's/^.* //'`
+    local mvnJson=`curl -s --get --data-urlencode "q=1:\"$sha1Jar\"" \
+	    http://search.maven.org/solrsearch/select\?wt=json`
+    local scope=""
+    if [ ! -z $2 ]; then
+	local scope="<scope>$2<\/scope>"
+    fi
+
+    if [ $? -gt 0 ]; then
+	echo "<!-- Failed to automatically generate dependency information for '$1': $? -->"
+    else
+	local result=`echo $mvnJson | sed 's/.*"id":"\([^\:]*\)\:\([^\:]*\)\:\([^"]*\)".*/<dependency><groupId>\1<\/groupId><artifactId>\2<\/artifactId><version>\3<\/version>'$scope'<\/dependency>/'`
+	if [[ $result == *\<dependency\>* ]]; then
+	    echo $result
+	else
+	    echo "<!-- Failed to automatically generate dependency information for '$1': $result -->"
+	fi
+    fi
+}
+
+RESULT=`extractFromPom $1 $2`
+if [ -z "$RESULT" ]; then
+    RESULT=`extractFromMvnRepo $1 $2`
+fi
+
+jarBasename=`basename $1`
+echo "<!-- '$jarBasename' -->"
+echo $RESULT
